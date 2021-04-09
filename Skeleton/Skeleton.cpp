@@ -61,6 +61,7 @@ const char *const fragmentSource = R"(
 
 GPUProgram gpuProgram; // vertex and fragment shaders
 unsigned int vao;	   // virtual world on the GPU
+const float EPSILON = 0.01f;
 
 struct Material {
 	vec3 ka, kd, ks;
@@ -130,50 +131,99 @@ struct Dodecahedron : public Intersectable {
 			{6,  7,  20, 11, 15}
 	};
 
+	Dodecahedron() {
+		//TODO: ha nagyon fucked a tükrözõdés akkor ezeket kell baszni
+		vec3 kd(1.5f, 1.5f, 1.5f), ks(50, 50, 50);
+		material = new Material(kd, ks, 50);
+	}
+
 	std::pair<vec3, vec3> getObjectPlane(int faceIndex) {
 		vec3 p1 = vertices[faces[faceIndex][0] - 1];
 		vec3 p2 = vertices[faces[faceIndex][1] - 1];
 		vec3 p3 = vertices[faces[faceIndex][2] - 1];
 		
 		vec3 normal = cross(p2 - p1, p3 - p1);
-		if (dot(p1, normal) < 0) //ha kifelé mutat meginvertáljuk
+		if (dot(p1, normal) < 0)	//ha kifelé mutat meginvertáljuk
 			normal = -normal;
 		//TODO: szkél??
 		return std::pair<vec3, vec3>(p1, normal);
 	}
 
-	Hit intersect(const Ray &ray) {
-		Hit hit;
+	Hit intersect(const Ray &ray, Hit hit) {
 		for (int i = 0; i < faces.size(); i++) {
-			std
+			std::pair<vec3, vec3> planePair = getObjectPlane(i);
+			vec3 normal = planePair.first;	//the normal of the plane
+			vec3 p1 = planePair.second;	//first point of face
+
+			float ti;	//distance on ray from start 'till first intersection
+			if (abs(dot(normal, ray.dir)) > EPSILON) {
+				ti = dot(p1 - ray.start, normal) / dot(normal, ray.dir);
+			} else {
+				ti = -1.0f;
+			}
+
+			if (ti <= EPSILON || (ti > hit.t && hit.t > 0)) continue;	//is current ti closer than hit.t?
+			vec3 pintersect = ray.start + ray.dir * ti;
+
+			//now we check if intersection is outside of the face or not
+			bool outside = false;
+			for (int j = 0; j < faces.size(); j++) {
+				if (i == j) continue;
+				std::pair<vec3, vec3>otherPlanePair = getObjectPlane(j);
+				vec3 otherNormal = otherPlanePair.first;
+				vec3 otherPoint = otherPlanePair.second;
+				if (dot(normal, pintersect - otherPoint) > 0) {	//checks if normalvector is pointing inwards
+					outside = true;
+					break;
+				}
+			}
+			if (!outside) {
+				hit.t = ti;
+				hit.position = pintersect;
+				hit.normal = normalize(normal);
+				hit.material = material;
+			}
 		}
-		
+		return hit;
 		
 	}
 };
 
 
+//TODO: megérteni mi történik itt
+struct Camera
+{
+    vec3 eye, lookat, right, pvup, rvup;
+    float fov = 45 * (float)M_PI / 180;
+ 
+    Camera() : eye(0, 1, 1), pvup(0, 0, 1), lookat(0, 0, 0) { set(); }
+    void set()
+    {
+        vec3 w = eye - lookat;
+        float f = length(w);
+        right = normalize(cross(pvup, w)) * f * tanf(fov / 2);
+        rvup = normalize(cross(w, right)) * f * tanf(fov / 2);
+    }
+    void Animate(float t)
+    {
+		//rotates the camera around lookat ( = (0, 0, 0))
+        float r = sqrtf(eye.x * eye.x + eye.y * eye.y);
+        eye = vec3(r * cos(t) + lookat.x, r * sin(t) + lookat.y, eye.z);
+        set();
+    }
+};
+
+struct Light {
+	vec3 direction;
+	vec3 Le;
+	Light(vec3 _direction, vec3 _Le) : direction(_direction), Le(_Le) {};
+};
+
 // Initialization, create an OpenGL context
 void onInitialization() {
 	glViewport(0, 0, windowWidth, windowHeight);
-
-	glGenVertexArrays(1, &vao);	// get 1 vao id
-	glBindVertexArray(vao);		// make it active
-
-	unsigned int vbo;		// vertex buffer object
-	glGenBuffers(1, &vbo);	// Generate 1 buffer
-	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	// Geometry with 24 bytes (6 floats or 3 x 2 coordinates)
-	float vertices[] = { -0.8f, -0.8f, -0.6f, 1.0f, 0.8f, -0.2f };
-	glBufferData(GL_ARRAY_BUFFER, 	// Copy to GPU target
-		sizeof(vertices),  // # bytes
-		vertices,	      	// address
-		GL_STATIC_DRAW);	// we do not change later
-
-	glEnableVertexAttribArray(0);  // AttribArray 0
-	glVertexAttribPointer(0,       // vbo -> AttribArray 0
-		2, GL_FLOAT, GL_FALSE, // two floats/attrib, not fixed-point
-		0, NULL); 		     // stride, offset: tightly packed
+	Dodecahedron dodecahedron();
+	//TODO: create scene
 
 	// create program for the GPU
 	gpuProgram.create(vertexSource, fragmentSource, "outColor");
