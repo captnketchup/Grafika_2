@@ -96,7 +96,7 @@ struct Material {
 	vec3 ka, kd, ks;
 	float shininess;
 	bool isReflective;
-	Material(vec3 _kd, vec3 _ks, float _shininess) : ka(_kd *M_PI), kd(_kd), ks(_ks) { shininess = _shininess; };
+	Material(vec3 _kd, vec3 _ks, float _shininess, bool _isReflective) : ka(_kd *M_PI), kd(_kd), ks(_ks), shininess(_shininess), isReflective(_isReflective) {};
 };
 
 struct Hit {
@@ -120,6 +120,43 @@ protected:
 public:
 	virtual Hit intersect(const Ray &ray, Hit hit) = 0;
 
+};
+
+struct Elipsoid : public Intersectable {
+	vec3 center;
+	vec3 radius;
+
+	Elipsoid() {}
+
+	Elipsoid(vec3 center, float xRad, float yRad, float zRad, Material* _material) : center(center), radius(xRad, yRad, zRad) {
+		material = _material;
+	}
+
+	Hit intersect(const Ray& ray, Hit uselessHit) {
+		Hit hit;
+		//Forras: https://en.wikipedia.org/wiki/Ellipsoid
+		float a = (ray.dir.x * ray.dir.x) / (radius.x * radius.x) +
+			(ray.dir.y * ray.dir.y) / (radius.y * radius.y) +
+			(ray.dir.z * ray.dir.z) / (radius.z * radius.z);
+		float b = ((ray.start.x - center.x) * ray.dir.x * 2.0) / (radius.x * radius.x) +
+			((ray.start.y - center.y) * ray.dir.y * 2.0) / (radius.y * radius.y) +
+			((ray.start.z - center.z) * ray.dir.z * 2.0) / (radius.z * radius.z);
+		float c = ((ray.start.x - center.x) * (ray.start.x - center.x)) / (radius.x * radius.x) +
+			((ray.start.y - center.y) * (ray.start.y - center.y)) / (radius.y * radius.y) +
+			((ray.start.z - center.z) * (ray.start.z - center.z)) / (radius.z * radius.z) - 1.0f;
+		float discr = b * b - 4.0 * a * c;
+		if (discr < 0) return hit;
+		float sqrt_discr = sqrtf(discr);
+		float t1 = (-b + sqrt_discr) / 2.0 / a;
+		float t2 = (-b - sqrt_discr) / 2.0 / a;
+		if (t1 <= 0) return hit;
+		hit.t = (t2 > 0) ? t2 : t1;
+		hit.position = ray.start + ray.dir * hit.t;
+		hit.normal = normalize(vec3(hit.position.x / (radius.x * radius.x), hit.position.y / (radius.y * radius.y), hit.position.z / (radius.z * radius.z)) * 2.0);
+		hit.material = material;
+		return hit;
+
+	}
 };
 
 class Dodecahedron : public Intersectable {
@@ -165,7 +202,7 @@ public:
 	Dodecahedron() {
 		//TODO: ha nagyon fucked a tükrözõdés akkor ezeket kell baszni
 		vec3 kd(1.5f, 1.5f, 1.5f), ks(50, 50, 50);
-		material = new Material(kd, ks, 50);
+		material = new Material(kd, ks, 50, false);
 		material->isReflective = false;
 	}
 
@@ -184,28 +221,30 @@ public:
 	Hit intersect(const Ray &ray, Hit hit) {
 		for (int i = 0; i < faces.size(); i++) {
 			std::pair<vec3, vec3> planePair = getObjectPlane(i);
-			vec3 normal = planePair.first;	//the normal of the plane
-			vec3 p1 = planePair.second;	//first point of face
+			vec3 p1 = planePair.first;	//first point of face
+			vec3 normal = planePair.second;	//the normal of the plane
 
 			float ti;	//distance on ray from start 'till first intersection
 			if (abs(dot(normal, ray.dir)) > EPSILON) {
 				ti = dot(p1 - ray.start, normal) / dot(normal, ray.dir);
-			}
-			else {
+			} else {
 				ti = -1.0f;
 			}
 
 			if (ti <= EPSILON || (ti > hit.t && hit.t > 0)) continue;	//is current ti closer than hit.t?
 			vec3 pintersect = ray.start + ray.dir * ti;
 
+
 			//now we check if intersection is outside of the face or not
 			bool outside = false;
 			for (int j = 0; j < faces.size(); j++) {
 				if (i == j) continue;
-				std::pair<vec3, vec3>otherPlanePair = getObjectPlane(j);
-				vec3 otherNormal = otherPlanePair.first;
-				vec3 otherPoint = otherPlanePair.second;
+				std::pair<vec3, vec3> otherPlanePair = getObjectPlane(j);
+				vec3 otherPoint = otherPlanePair.first;
+				vec3 otherNormal = otherPlanePair.second;
+				//printf("normal: %3.5f, %3.5f, %3.5f\npintersect: %3.5f, %3.5f, 3.5f\nother point: %3.5f, %3.5f, %3.5f\n", normal.x, normal.y, normal.z, pintersect.x, pintersect.y, pintersect.z, otherPoint.x, otherPoint.y, otherPoint.z);
 				if (dot(normal, pintersect - otherPoint) > 0) {	//checks if normalvector is pointing inwards
+					//printf("entered if(dot(normal, pintersect - otherPoint > 0))\n");
 					outside = true;
 					break;
 				}
@@ -215,6 +254,7 @@ public:
 				hit.position = pintersect;
 				hit.normal = normalize(normal);
 				hit.material = material;
+				printf("intersect");
 			}
 		}
 		return hit;
@@ -222,12 +262,11 @@ public:
 	}
 };
 
-
 //TODO: megérteni mi történik itt
 class Camera {
 	vec3 eye, lookat, right, up;
 	vec3 vup = { 0.0f, 1.0f, 0.0f };
-	float fov = 45 * M_PI / 180;
+	float fov = 90.0f * M_PI / 180.0f;
 public:
 	void set(vec3 _eye, vec3 _lookat) {
 		eye = _eye;
@@ -254,17 +293,18 @@ struct Light {
 	//vec3 position;
 	vec3 direction;
 	vec3 Le;
-	Light(vec3 _position, vec3 _direction, vec3 _Le) : Le(_Le) {
+	Light(vec3 _direction, vec3 _Le) : Le(_Le) {
 		direction = normalize(_direction);
 	};
 };
 
 class Scene {
+	Elipsoid elipsoid;
 	Dodecahedron dodecahedron;
 	std::vector<Light *> lights;
 	Camera camera;
 	vec3 La = { 0.4f, 0.4f, 0.4f };
-	//TODO: La (global illumnation), ellipsoid
+	//TODO: ellipsoid
 
 public:
 	void build() {
@@ -272,30 +312,52 @@ public:
 		camera.set(vec3(5.0f, 5.0f, 1.0f), vec3(0.0f, 0.0f, 0.0f));
 		dodecahedron = Dodecahedron();
 		vec3 Le = { 2.0f, 2.0f, 2.0f };
-		vec3 lightDirection = { 0.0f, 1.0f, 0.0f };
-		vec3 lightPosition = { 0.0f, 0.0f, 0.0f };
-		lights.push_back(new Light(lightPosition, lightDirection, Le));
+		vec3 lightDirection = { 5.0f, 5.0f, 1.0f };
+		lights.push_back(new Light(lightDirection, Le));
 		//TODO: ellipsoid
+
+
+		//TODO: DELETE
+		vec3 kd1(0.3f, 0.2f, 0.1f), ks1(2, 2, 2);
+		Material * material1 = new Material(kd1, ks1, 50, false);
+		elipsoid = Elipsoid(vec3(0, 0, 0), 1.0f, 2.0f, 1.0f, material1);
 	}
 
 	Hit firstIntersect(Ray ray) {
 		Hit bestHit = Hit();
 		//TODO: Ellipsoid ray megvizsgálása
 		// bestHit = intersectEllipsoid valami;
-		bestHit = dodecahedron.intersect(ray, bestHit);
+		/*bestHit = dodecahedron.intersect(ray, bestHit);
 		if (dot(ray.dir, bestHit.normal) > 0)
-			bestHit.normal = bestHit.normal * (-1);
+			bestHit.normal = bestHit.normal * (-1);*/
+
+		Hit hit = elipsoid.intersect(ray, Hit());
+			if (hit.t > 0 && (bestHit.t < 0 || hit.t < bestHit.t)) {
+				bestHit = hit;
+			}
+		if (dot(ray.dir, bestHit.normal) > 0) bestHit.normal = bestHit.normal * (-1);
 		return bestHit;
 	}
 
 	void render(std::vector<vec4> &image) {
+		vec4 black = vec4(1.0f, 1.0f, 1.0f, 1.0f);
+		vec4 white = vec4(0.0f, 0.0f, 0.0f, 1.0f);
 		for (int Y = 0; Y < windowHeight; Y++) {
 #pragma omp parallel for
 			for (int X = 0; X < windowWidth; X++) {
 				vec3 color = trace(camera.getRay(X, Y));
 				image[Y * windowWidth + X] = vec4(color.x, color.y, color.z, 1);
+				//image[Y * windowWidth + X] = ((X + Y) % 2) ? black : white;
 			}
 		}
+	}
+
+	bool shadowIntersect(Ray ray) {	// for directional lights
+		//TODO: ezt szépítsd meg úristen de ronda
+		Hit hit;
+		if (elipsoid.intersect(ray, hit).t > 0) return true;
+		if (dodecahedron.intersect(ray, hit).t > 0) return true;
+		return false;
 	}
 
 	int maxDepth = 5;
@@ -303,6 +365,7 @@ public:
 	vec3 trace(Ray ray, int depth = 0) {
 		Hit hit = firstIntersect(ray);
 		if (hit.t < 0) return La;
+		//return vec3(1.0f, 0.0f, 0.0f);
 		vec3 outRadiance(0, 0, 0);		// the radiancy(kinda color) of a given point where the ray intersects
 		outRadiance = outRadiance + La; // we add the ambient light to it
 		if (!hit.material->isReflective) { //if material is rough
@@ -311,10 +374,10 @@ public:
 				//Ray shadowRay(hit.position + hit.normal * EPSILON, light->position - hit.position);
 				Ray shadowRay(hit.position + hit.normal * EPSILON, light->direction);
 				float cosTheta = dot(hit.normal, light->direction);		// is used to determine whether light is coming behind from the object
-				Hit shadowHit = firstIntersect(shadowRay);
+				//Hit shadowHit = firstIntersect(shadowRay);
 				// if there's no object between the light source and the given point
 				//if (cosTheta > 0 && (hit.t < 0 || shadowHit.t > length(light->position - hit.position))) {
-				if (cosTheta > 0 && hit.t < 0) {
+				if (cosTheta > 0 && !shadowIntersect(shadowRay)) {
 					outRadiance = outRadiance + light->Le * hit.material->kd * cosTheta;
 					vec3 halfway = normalize(-ray.dir + light->direction);
 					float cosDelta = dot(hit.normal, halfway);
@@ -371,10 +434,11 @@ void onInitialization() {
 	// this will contain the pixel data
 	std::vector<vec4> image(windowWidth * windowHeight);
 
+	scene.render(image);
+
 	// copy image to GPU as a texture
 	fullScreenTexturedQuad = new FullScreenTexturedQuad(windowWidth, windowHeight, image);
 
-	scene.render(image);
 
 	// create program for the GPU
 	gpuProgram.create(vertexSource, fragmentSource, "outColor");
