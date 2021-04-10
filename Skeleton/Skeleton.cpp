@@ -66,6 +66,7 @@ const float EPSILON = 0.01f;
 struct Material {
 	vec3 ka, kd, ks;
 	float shininess;
+	bool isReflective;
 	Material(vec3 _kd, vec3 _ks, float _shininess) : ka(_kd *M_PI), kd(_kd), ks(_ks) { shininess = _shininess; };
 };
 
@@ -88,11 +89,11 @@ class Intersectable {
 protected:
 	Material *material;
 public:
-	virtual Hit intersect(const Ray &ray) = 0;
+	virtual Hit intersect(const Ray &ray, Hit hit) = 0;
 
 };
 
-struct Dodecahedron : public Intersectable {
+class Dodecahedron : public Intersectable {
 	std::vector<vec3> vertices = {
 		{0.0f, 0.618f, 1.618f},
 		{0.0f, -0.618, 1.618f},
@@ -131,17 +132,19 @@ struct Dodecahedron : public Intersectable {
 			{6,  7,  20, 11, 15}
 	};
 
+public:
 	Dodecahedron() {
 		//TODO: ha nagyon fucked a tükrözõdés akkor ezeket kell baszni
 		vec3 kd(1.5f, 1.5f, 1.5f), ks(50, 50, 50);
 		material = new Material(kd, ks, 50);
+		material->isReflective = false;
 	}
 
 	std::pair<vec3, vec3> getObjectPlane(int faceIndex) {
 		vec3 p1 = vertices[faces[faceIndex][0] - 1];
 		vec3 p2 = vertices[faces[faceIndex][1] - 1];
 		vec3 p3 = vertices[faces[faceIndex][2] - 1];
-		
+
 		vec3 normal = cross(p2 - p1, p3 - p1);
 		if (dot(p1, normal) < 0)	//ha kifelé mutat meginvertáljuk
 			normal = -normal;
@@ -158,7 +161,8 @@ struct Dodecahedron : public Intersectable {
 			float ti;	//distance on ray from start 'till first intersection
 			if (abs(dot(normal, ray.dir)) > EPSILON) {
 				ti = dot(p1 - ray.start, normal) / dot(normal, ray.dir);
-			} else {
+			}
+			else {
 				ti = -1.0f;
 			}
 
@@ -185,38 +189,112 @@ struct Dodecahedron : public Intersectable {
 			}
 		}
 		return hit;
-		
+
 	}
 };
 
 
 //TODO: megérteni mi történik itt
-struct Camera
+class Camera
 {
-    vec3 eye, lookat, right, pvup, rvup;
-    float fov = 45 * (float)M_PI / 180;
- 
-    Camera() : eye(0, 1, 1), pvup(0, 0, 1), lookat(0, 0, 0) { set(); }
-    void set()
-    {
-        vec3 w = eye - lookat;
-        float f = length(w);
-        right = normalize(cross(pvup, w)) * f * tanf(fov / 2);
-        rvup = normalize(cross(w, right)) * f * tanf(fov / 2);
-    }
-    void Animate(float t)
-    {
+public:
+	vec3 eye, lookat, right, pvup, rvup;		// hol van, hova néz, merre van jobbra, "kamu"up, "real"up
+	float fov = 45 * (float)M_PI / 180;
+
+	Camera() : eye(0, 1, 1), pvup(0, 0, 1), lookat(0, 0, 0) { set(); }
+	void set()
+	{
+		vec3 w = eye - lookat;
+		float f = length(w);
+		right = normalize(cross(pvup, w)) * f * tanf(fov / 2);
+		rvup = normalize(cross(w, right)) * f * tanf(fov / 2);
+	}
+	void Animate(float t)
+	{
 		//rotates the camera around lookat ( = (0, 0, 0))
-        float r = sqrtf(eye.x * eye.x + eye.y * eye.y);
-        eye = vec3(r * cos(t) + lookat.x, r * sin(t) + lookat.y, eye.z);
-        set();
-    }
+		float r = sqrtf(eye.x * eye.x + eye.y * eye.y);
+		eye = vec3(r * cos(t) + lookat.x, r * sin(t) + lookat.y, eye.z);
+		set();
+	}
+	Ray getRay(int X, int Y) {
+		vec3 dir = lookat + right * (2.0 * (X + 0.5) / windowWidth - 1) + rvup * (2.0 * (Y + 0.5) / windowHeight - 1) - eye;
+		return Ray(eye, dir);
+	}
 };
 
 struct Light {
+	vec3 position;
 	vec3 direction;
 	vec3 Le;
-	Light(vec3 _direction, vec3 _Le) : direction(_direction), Le(_Le) {};
+	Light(vec3 _position, vec3 _direction, vec3 _Le) : position(_position), direction(_direction), Le(_Le) {};
+};
+
+class Scene {
+	Dodecahedron dodecahedron;
+	std::vector<Light *> lights;
+	Camera camera;
+	vec3 La = { 0.4f, 0.4f, 0.4f };
+	//TODO: La (global illumnation), ellipsoid
+
+public:
+	void build() {
+		camera = Camera();
+		dodecahedron = Dodecahedron();
+		vec3 Le = { 2.0f, 2.0f, 2.0f };
+		vec3 lightDirection = { 0.0f, 1.0f, 0.0f };
+		vec3 lightPosition = { 0.0f, 0.0f, 0.0f };
+		lights.push_back(new Light(lightPosition, lightDirection, Le));
+		//TODO: ellipsoid
+	}
+
+	Hit firstIntersect(Ray ray) {
+		Hit bestHit = Hit();
+		//TODO: Ellipsoid ray megvizsgálása
+		// bestHit = intersectEllipsoid valami;
+		bestHit = dodecahedron.intersect(ray, bestHit);
+		if (dot(ray.dir, bestHit.normal) > 0)
+			bestHit.normal = bestHit.normal * (-1);
+		return bestHit;
+	}
+
+	void render(std::vector<vec4> &pixels) {
+		for (int x; x < windowWidth; x++) {
+			for (int y; y < windowHeight; y++) {
+				vec3 color = trace(camera.getRay(x, y));
+				pixels[x * windowHeight + y] = vec4(color.x, color.y, color.z, 1.0f);
+			}
+		}
+	}
+
+	int maxDepth = 5;
+
+	vec3 trace(Ray ray, int depth = 0) {
+		Hit hit = firstIntersect(ray);
+		if (hit.t < 0) return La;
+		vec3 outRadiance(0, 0, 0);		// the radiancy(kinda color) of a given point where the ray intersects
+		outRadiance = outRadiance + La; // we add the ambient light to it
+		if (!hit.material->isReflective) { //if material is rough
+			for (Light *light : lights) {
+				//TODO: epsilon
+				Ray shadowRay(hit.position, light->position - hit.position);
+				float cosTheta = dot(hit.normal, light->direction);		// is used to determine whether light is coming behind from the object
+				Hit shadowHit = firstIntersect(shadowRay);
+				// if there's no object between the light source and the given point
+				if (cosTheta > 0 && (hit.t < 0 || shadowHit.t > length(light->position - hit.position))) {
+					outRadiance = outRadiance + light->Le * hit.material->kd * cosTheta;
+					vec3 halfway = normalize(-ray.dir + light->direction);
+					float cosDelta = dot(hit.normal, halfway);
+					if (cosDelta > 0) outRadiance = outRadiance + light->Le * hit.material->ks * powf(cosDelta, hit.material->shininess);
+				}
+			}
+		} else {
+			//TODO: trace rekurzió
+		}
+		// maybe ray.weight???????????????????
+		return outRadiance;
+	}
+
+
 };
 
 // Initialization, create an OpenGL context
