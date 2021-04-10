@@ -33,35 +33,64 @@
 //=============================================================================================
 #include "framework.h"
 
-// vertex shader in GLSL: It is a Raw string (C++11) since it contains new line characters
-const char *const vertexSource = R"(
-	#version 330				// Shader 3.3
-	precision highp float;		// normal floats, makes no difference on desktop computers
+//// vertex shader in GLSL: It is a Raw string (C++11) since it contains new line characters
+//const char *const vertexSource = R"(
+//	#version 330				// Shader 3.3
+//	precision highp float;		// normal floats, makes no difference on desktop computers
+//
+//	uniform mat4 MVP;			// uniform variable, the Model-View-Projection transformation matrix
+//	layout(location = 0) in vec2 vp;	// Varying input: vp = vertex position is expected in attrib array 0
+//
+//	void main() {
+//		gl_Position = vec4(vp.x, vp.y, 0, 1) * MVP;		// transform vp from modeling space to normalized device space
+//	}
+//)";
+//
+//// fragment shader in GLSL
+//const char *const fragmentSource = R"(
+//	#version 330			// Shader 3.3
+//	precision highp float;	// normal floats, makes no difference on desktop computers
+//	
+//	uniform vec3 color;		// uniform variable, the color of the primitive
+//	out vec4 outColor;		// computed color of the current pixel
+//
+//	void main() {
+//		outColor = vec4(color, 1);	// computed color is the color of the primitive
+//	}
+//)";
 
-	uniform mat4 MVP;			// uniform variable, the Model-View-Projection transformation matrix
-	layout(location = 0) in vec2 vp;	// Varying input: vp = vertex position is expected in attrib array 0
+// vertex shader in GLSL
+const char *vertexSource = R"(
+	#version 330
+    precision highp float;
+
+	layout(location = 0) in vec2 cVertexPosition;	// Attrib Array 0
+	out vec2 texcoord;
 
 	void main() {
-		gl_Position = vec4(vp.x, vp.y, 0, 1) * MVP;		// transform vp from modeling space to normalized device space
+		texcoord = (cVertexPosition + vec2(1, 1))/2;							// -1,1 to 0,1
+		gl_Position = vec4(cVertexPosition.x, cVertexPosition.y, 0, 1); 		// transform to clipping space
 	}
 )";
 
 // fragment shader in GLSL
-const char *const fragmentSource = R"(
-	#version 330			// Shader 3.3
-	precision highp float;	// normal floats, makes no difference on desktop computers
-	
-	uniform vec3 color;		// uniform variable, the color of the primitive
-	out vec4 outColor;		// computed color of the current pixel
+const char *fragmentSource = R"(
+	#version 330
+    precision highp float;
+
+	uniform sampler2D textureUnit;
+	in  vec2 texcoord;			// interpolated texture coordinates
+	out vec4 fragmentColor;		// output that goes to the raster memory as told by glBindFragDataLocation
 
 	void main() {
-		outColor = vec4(color, 1);	// computed color is the color of the primitive
+		fragmentColor = texture(textureUnit, texcoord); 
 	}
 )";
 
+
 GPUProgram gpuProgram; // vertex and fragment shaders
 unsigned int vao;	   // virtual world on the GPU
-const float EPSILON = 0.01f;
+const float EPSILON = 0.0001f;
 
 struct Material {
 	vec3 ka, kd, ks;
@@ -195,38 +224,39 @@ public:
 
 
 //TODO: megérteni mi történik itt
-class Camera
-{
+class Camera {
+	vec3 eye, lookat, right, up;
+	vec3 vup = { 0.0f, 1.0f, 0.0f };
+	float fov = 45 * M_PI / 180;
 public:
-	vec3 eye, lookat, right, pvup, rvup;		// hol van, hova néz, merre van jobbra, "kamu"up, "real"up
-	float fov = 45 * (float)M_PI / 180;
-
-	Camera() : eye(0, 1, 1), pvup(0, 0, 1), lookat(0, 0, 0) { set(); }
-	void set()
-	{
+	void set(vec3 _eye, vec3 _lookat) {
+		eye = _eye;
+		lookat = _lookat;
 		vec3 w = eye - lookat;
-		float f = length(w);
-		right = normalize(cross(pvup, w)) * f * tanf(fov / 2);
-		rvup = normalize(cross(w, right)) * f * tanf(fov / 2);
+		float focus = length(w);
+		right = normalize(cross(vup, w)) * focus * tanf(fov / 2);
+		up = normalize(cross(w, right)) * focus * tanf(fov / 2);
+	}
+	Ray getRay(int X, int Y) {
+		vec3 dir = lookat + right * (2.0f * (X + 0.5f) / windowWidth - 1) + up * (2.0f * (Y + 0.5f) / windowHeight - 1) - eye;
+		return Ray(eye, dir);
 	}
 	void Animate(float t)
 	{
 		//rotates the camera around lookat ( = (0, 0, 0))
 		float r = sqrtf(eye.x * eye.x + eye.y * eye.y);
 		eye = vec3(r * cos(t) + lookat.x, r * sin(t) + lookat.y, eye.z);
-		set();
-	}
-	Ray getRay(int X, int Y) {
-		vec3 dir = lookat + right * (2.0 * (X + 0.5) / windowWidth - 1) + rvup * (2.0 * (Y + 0.5) / windowHeight - 1) - eye;
-		return Ray(eye, dir);
+		set(eye, lookat);
 	}
 };
 
 struct Light {
-	vec3 position;
+	//vec3 position;
 	vec3 direction;
 	vec3 Le;
-	Light(vec3 _position, vec3 _direction, vec3 _Le) : position(_position), direction(_direction), Le(_Le) {};
+	Light(vec3 _position, vec3 _direction, vec3 _Le) : Le(_Le) {
+		direction = normalize(_direction);
+	};
 };
 
 class Scene {
@@ -239,6 +269,7 @@ class Scene {
 public:
 	void build() {
 		camera = Camera();
+		camera.set(vec3(5.0f, 5.0f, 1.0f), vec3(0.0f, 0.0f, 0.0f));
 		dodecahedron = Dodecahedron();
 		vec3 Le = { 2.0f, 2.0f, 2.0f };
 		vec3 lightDirection = { 0.0f, 1.0f, 0.0f };
@@ -257,11 +288,12 @@ public:
 		return bestHit;
 	}
 
-	void render(std::vector<vec4> &pixels) {
-		for (int x; x < windowWidth; x++) {
-			for (int y; y < windowHeight; y++) {
-				vec3 color = trace(camera.getRay(x, y));
-				pixels[x * windowHeight + y] = vec4(color.x, color.y, color.z, 1.0f);
+	void render(std::vector<vec4> &image) {
+		for (int Y = 0; Y < windowHeight; Y++) {
+#pragma omp parallel for
+			for (int X = 0; X < windowWidth; X++) {
+				vec3 color = trace(camera.getRay(X, Y));
+				image[Y * windowWidth + X] = vec4(color.x, color.y, color.z, 1);
 			}
 		}
 	}
@@ -276,32 +308,73 @@ public:
 		if (!hit.material->isReflective) { //if material is rough
 			for (Light *light : lights) {
 				//TODO: epsilon
-				Ray shadowRay(hit.position, light->position - hit.position);
+				//Ray shadowRay(hit.position + hit.normal * EPSILON, light->position - hit.position);
+				Ray shadowRay(hit.position + hit.normal * EPSILON, light->direction);
 				float cosTheta = dot(hit.normal, light->direction);		// is used to determine whether light is coming behind from the object
 				Hit shadowHit = firstIntersect(shadowRay);
 				// if there's no object between the light source and the given point
-				if (cosTheta > 0 && (hit.t < 0 || shadowHit.t > length(light->position - hit.position))) {
+				//if (cosTheta > 0 && (hit.t < 0 || shadowHit.t > length(light->position - hit.position))) {
+				if (cosTheta > 0 && hit.t < 0) {
 					outRadiance = outRadiance + light->Le * hit.material->kd * cosTheta;
 					vec3 halfway = normalize(-ray.dir + light->direction);
 					float cosDelta = dot(hit.normal, halfway);
 					if (cosDelta > 0) outRadiance = outRadiance + light->Le * hit.material->ks * powf(cosDelta, hit.material->shininess);
 				}
 			}
-		} else {
+		}
+		else {
 			//TODO: trace rekurzió
 		}
 		// maybe ray.weight???????????????????
 		return outRadiance;
 	}
-
-
 };
+
+class FullScreenTexturedQuad {
+	unsigned int vao;	// vertex array object id and texture id
+	Texture texture;
+public:
+	FullScreenTexturedQuad(int windowWidth, int windowHeight, std::vector<vec4> &image)
+		: texture(windowWidth, windowHeight, image)
+	{
+		glGenVertexArrays(1, &vao);	// create 1 vertex array object
+		glBindVertexArray(vao);		// make it active
+
+		unsigned int vbo;		// vertex buffer objects
+		glGenBuffers(1, &vbo);	// Generate 1 vertex buffer objects
+
+		// vertex coordinates: vbo0 -> Attrib Array 0 -> vertexPosition of the vertex shader
+		glBindBuffer(GL_ARRAY_BUFFER, vbo); // make it active, it is an array
+		float vertexCoords[] = { -1, -1,  1, -1,  1, 1,  -1, 1 };	// two triangles forming a quad
+		glBufferData(GL_ARRAY_BUFFER, sizeof(vertexCoords), vertexCoords, GL_STATIC_DRAW);	   // copy to that part of the memory which is not modified 
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, NULL);     // stride and offset: it is tightly packed
+	}
+
+	void Draw() {
+		glBindVertexArray(vao);	// make the vao and its vbos active playing the role of the data source
+		gpuProgram.setUniform(texture, "textureUnit");
+		glDrawArrays(GL_TRIANGLE_FAN, 0, 4);	// draw two triangles forming a quad
+	}
+};
+
+FullScreenTexturedQuad *fullScreenTexturedQuad;
 
 // Initialization, create an OpenGL context
 void onInitialization() {
 	glViewport(0, 0, windowWidth, windowHeight);
 	Dodecahedron dodecahedron();
 	//TODO: create scene
+	Scene scene = Scene();
+	scene.build();
+
+	// this will contain the pixel data
+	std::vector<vec4> image(windowWidth * windowHeight);
+
+	// copy image to GPU as a texture
+	fullScreenTexturedQuad = new FullScreenTexturedQuad(windowWidth, windowHeight, image);
+
+	scene.render(image);
 
 	// create program for the GPU
 	gpuProgram.create(vertexSource, fragmentSource, "outColor");
@@ -309,24 +382,7 @@ void onInitialization() {
 
 // Window has become invalid: Redraw
 void onDisplay() {
-	glClearColor(0, 0, 0, 0);     // background color
-	glClear(GL_COLOR_BUFFER_BIT); // clear frame buffer
-
-	// Set color to (0, 1, 0) = green
-	int location = glGetUniformLocation(gpuProgram.getId(), "color");
-	glUniform3f(location, 0.0f, 1.0f, 0.0f); // 3 floats
-
-	float MVPtransf[4][4] = { 1, 0, 0, 0,    // MVP matrix, 
-							  0, 1, 0, 0,    // row-major!
-							  0, 0, 1, 0,
-							  0, 0, 0, 1 };
-
-	location = glGetUniformLocation(gpuProgram.getId(), "MVP");	// Get the GPU location of uniform variable MVP
-	glUniformMatrix4fv(location, 1, GL_TRUE, &MVPtransf[0][0]);	// Load a 4x4 row-major float matrix to the specified location
-
-	glBindVertexArray(vao);  // Draw call
-	glDrawArrays(GL_TRIANGLES, 0 /*startIdx*/, 3 /*# Elements*/);
-
+	fullScreenTexturedQuad->Draw();
 	glutSwapBuffers(); // exchange buffers for double buffering
 }
 
