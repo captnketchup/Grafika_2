@@ -97,14 +97,14 @@ const float EPSILON = 0.01f;
 struct Material {
 	vec3 ka, kd, ks;
 	float shininess;
-	bool isReflective;
-	Material(vec3 _kd, vec3 _ks, float _shininess, bool _isReflective) : ka(_kd *M_PI), kd(_kd), ks(_ks), shininess(_shininess), isReflective(_isReflective) {};
+	Material(vec3 _kd, vec3 _ks, float _shininess, bool _isReflective) : ka(_kd *M_PI), kd(_kd), ks(_ks), shininess(_shininess) {};
 };
 
 struct Hit {
 	float t;
 	vec3 position, normal;
 	Material *material;
+	bool isReflective;
 	Hit() { t = -1; }
 };
 
@@ -162,11 +162,14 @@ class Dodecahedron : public Intersectable {
 	};
 
 public:
+	//TODO: átírni mert gyanúsan az õ számai kappa 
+	vec3 n = vec3(0.17, 0.35, 1.5);
+	vec3 kappa = vec3(3.1, 2.7, 1.9);
+
 	Dodecahedron() {
 		//TODO: ha nagyon fucked a tükrözõdés akkor ezeket kell baszni
-		vec3 kd(3.5f, 0.5f, 0.5f), ks(500, 0, 0);
-		material = new Material(kd, ks, 5000, false);
-		material->isReflective = false;
+		vec3 kd(0.5f, 0.05f, 1.5f), ks(500, 100, 100);
+		material = new Material(kd, ks, 50, false);
 	}
 
 	std::pair<vec3, vec3> getObjectPlane(int faceIndex) {
@@ -175,22 +178,25 @@ public:
 		vec3 p3 = vertices[faces[faceIndex][2] - 1];
 
 		vec3 normal = cross(p2 - p1, p3 - p1);
-		//WARN: idk a p2-p1 jó-e, eredetileg p1 volt csak de az nem logikus ????
 		if (dot(p1, normal) < 0)	//ha kifelé mutat meginvertáljuk
 			normal = -normal;
 		//TODO: szkél??
 		return std::make_pair(p1, normal);
 	}
 
+	float distanceFromPlane(vec3 point, vec3 planePoint, vec3 planeNormal) {
+		return abs(dot(point - planePoint, planeNormal));
+	}
+
 	Hit intersect(const Ray &ray, Hit hit) {
 		for (int i = 0; i < faces.size(); i++) {
 			std::pair<vec3, vec3> planePair = getObjectPlane(i);
-			vec3 p1 = planePair.first;	//first point of face
-			vec3 normal = planePair.second;	//the normal of the plane
+			vec3 planePoint = planePair.first;	//first point of face
+			vec3 planeNormal = planePair.second;	//the normal of the plane
 
 			float ti;	//distance on ray from start 'till first intersection
-			if (abs(dot(normal, ray.dir)) > EPSILON) {
-				ti = dot(p1 - ray.start, normal) / dot(normal, ray.dir);
+			if (abs(dot(planeNormal, ray.dir)) > EPSILON) {
+				ti = dot(planePoint - ray.start, planeNormal) / dot(planeNormal, ray.dir);
 			}
 			else {
 				ti = -1.0f;
@@ -201,23 +207,28 @@ public:
 
 			//now we check if intersection is outside of the face or not
 			bool outside = false;
+			bool reflective = true;
 			for (int j = 0; j < faces.size(); j++) {
 				if (i == j) continue;
 				std::pair<vec3, vec3> otherPlanePair = getObjectPlane(j);
-				vec3 otherPoint = otherPlanePair.first;
-				vec3 otherNormal = otherPlanePair.second;
+				vec3 otherPlanePoint = otherPlanePair.first;
+				vec3 otherPlaneNormal = otherPlanePair.second;
 				//printf("normal: %3.5f, %3.5f, %3.5f\npintersect: %3.5f, %3.5f, 3.5f\nother point: %3.5f, %3.5f, %3.5f\n", normal.x, normal.y, normal.z, pintersect.x, pintersect.y, pintersect.z, otherPoint.x, otherPoint.y, otherPoint.z);
-				if (dot(otherNormal, pintersect - otherPoint) > 0) {	//checks if normalvector is pointing inwards
+				if (dot(otherPlaneNormal, pintersect - otherPlanePoint) > 0) {	//checks if normalvector is pointing inwards
 					//printf("entered if(dot(normal, pintersect - otherPoint > 0))\n");
 					outside = true;
 					break;
+				}
+				if (distanceFromPlane(pintersect, otherPlanePoint, otherPlaneNormal) < 0.1f) {
+					reflective = false;
 				}
 			}
 			if (!outside) {
 				hit.t = ti;
 				hit.position = pintersect;
-				hit.normal = normalize(normal);
+				hit.normal = normalize(planeNormal);
 				hit.material = material;
+				hit.isReflective = reflective;
 				//printf("intersect");
 			}
 		}
@@ -225,6 +236,12 @@ public:
 
 	}
 };
+
+class Paraboloid : public Intersectable {
+	vec3 center;
+
+};
+
 
 //TODO: megérteni mi történik itt
 class Camera {
@@ -254,12 +271,9 @@ public:
 };
 
 struct Light {
-	//vec3 position;
-	vec3 direction;
+	vec3 position;
 	vec3 Le;
-	Light(vec3 _direction, vec3 _Le) : Le(_Le) {
-		direction = normalize(_direction);
-	};
+	Light(vec3 _position, vec3 _Le) : position(_position), Le(_Le) {};
 };
 
 class Scene {
@@ -268,6 +282,23 @@ class Scene {
 	vec3 La = { 0.4f, 0.4f, 0.4f };
 	//TODO: ellipsoid
 
+	// returns the reflected ray's direction vector
+	vec3 reflect(vec3 inDirectionVec, vec3 normal) {
+		return inDirectionVec - normal * dot(normal, inDirectionVec) * 2.0f;
+	}
+
+	vec3 Fresnel(vec3 inDirectionVec, vec3 normal) {
+		float cosa = -dot(inDirectionVec, normal);
+		vec3 one(1, 1, 1);
+		vec3 F0 = vec3();
+		vec3 n = dodecahedron.n;
+		vec3 kappa = dodecahedron.kappa;
+		F0.x = ((n.x - one.x)*(n.x - one.x) + kappa.x * kappa.x) / ((n.x + one.x)*(n.x + one.x) + kappa.x * kappa.x);
+		F0.y = ((n.y - one.y)*(n.y - one.y) + kappa.y * kappa.y) / ((n.y + one.y)*(n.y + one.y) + kappa.y * kappa.y);
+		F0.z = ((n.z - one.z)*(n.z - one.z) + kappa.z * kappa.z) / ((n.z + one.z)*(n.z + one.z) + kappa.z * kappa.z);
+		return F0 + (one - F0) * pow(1 - cosa, 5);
+	}
+
 public:
 	Camera camera;
 	void build() {
@@ -275,10 +306,10 @@ public:
 		camera.set(vec3(0.5f, 0.5f, 0.5f), vec3(0.0f, 0.0f, 0.0f));
 		dodecahedron = Dodecahedron();
 		vec3 Le = { 2.0f, 2.0f, 2.0f };
-		vec3 lightDirection = { 5.0f, 5.0f, 1.0f };
-		lights.push_back(new Light(lightDirection, Le));
-		lights.push_back(new Light(lightDirection * (-1), Le));
-		//TODO: ellipsoid
+		vec3 lightPosition = { 0, 0, 0 };
+		lights.push_back(new Light(lightPosition, Le));
+		//lights.push_back(new Light(lightDirection * (-1), Le));
+		//TODO: ellipsoid haha nem is az xDDDD
 	}
 
 	Hit firstIntersect(Ray ray) {
@@ -313,32 +344,37 @@ public:
 	int maxDepth = 5;
 
 	vec3 trace(Ray ray, int depth = 0) {
+		if (depth > maxDepth) return La;
 		Hit hit = firstIntersect(ray);
 		if (hit.t < 0) return La;
 		//return vec3(1.0f, 0.0f, 0.0f);
 		vec3 outRadiance(0, 0, 0);		// the radiancy(kinda color) of a given point where the ray intersects
-		outRadiance = outRadiance + La; // we add the ambient light to it
-		if (!hit.material->isReflective) { //if material is rough
+		//outRadiance = outRadiance + La; // we add the ambient light to it
+		if (!hit.isReflective) { //if material is rough
 			for (Light *light : lights) {
 				//TODO: epsilon
-				//Ray shadowRay(hit.position + hit.normal * EPSILON, light->position - hit.position);
-				Ray shadowRay(hit.position + hit.normal * EPSILON, light->direction);
-				float cosTheta = dot(hit.normal, light->direction);		// is used to determine whether light is coming behind from the object
+				vec3 lightDirection = hit.position - light->position;
+				Ray shadowRay(hit.position + hit.normal * EPSILON, lightDirection);
+				//Ray shadowRay(hit.position + hit.normal * EPSILON, light->direction);
+				float cosTheta = dot(hit.normal, lightDirection);		// is used to determine whether light is coming behind from the object
 				//Hit shadowHit = firstIntersect(shadowRay);
 				// if there's no object between the light source and the given point
 				//if (cosTheta > 0 && (hit.t < 0 || shadowHit.t > length(light->position - hit.position))) {
 				if (cosTheta > 0 && !shadowIntersect(shadowRay)) {
 					outRadiance = outRadiance + light->Le * hit.material->kd * cosTheta;
-					vec3 halfway = normalize(-ray.dir + light->direction);
+					vec3 halfway = normalize(-ray.dir + lightDirection);
 					float cosDelta = dot(hit.normal, halfway);
 					if (cosDelta > 0) outRadiance = outRadiance + light->Le * hit.material->ks * powf(cosDelta, hit.material->shininess);
 				}
 			}
 		}
 		else {
-			//TODO: trace rekurzió
+			vec3 reflectionDir = reflect(ray.dir, hit.normal);
+			Ray reflectRay(hit.position - hit.normal * EPSILON, reflectionDir);
+
+			//TODO:  * Fresnel(ray.dir, hit.normal);
+			outRadiance = outRadiance + trace(reflectRay, depth + 1);
 		}
-		// maybe ray.weight???????????????????
 		return outRadiance;
 	}
 } scene;
