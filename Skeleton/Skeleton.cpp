@@ -162,9 +162,8 @@ class Dodecahedron : public Intersectable {
 	};
 
 public:
-	//TODO: átírni mert gyanúsan az õ számai kappa 
-	vec3 n = vec3(0.17, 0.35, 1.5);
-	vec3 kappa = vec3(3.1, 2.7, 1.9);
+	vec3 n = vec3(0.01, 0.01, 0.01);
+	vec3 kappa = vec3(10.0, 10.0, 10.0);
 
 	Dodecahedron() {
 		//TODO: ha nagyon fucked a tükrözõdés akkor ezeket kell baszni
@@ -371,9 +370,8 @@ public:
 		else {
 			vec3 reflectionDir = reflect(ray.dir, hit.normal);
 			Ray reflectRay(hit.position - hit.normal * EPSILON, reflectionDir);
-
-			//TODO:  * Fresnel(ray.dir, hit.normal);
-			outRadiance = outRadiance + trace(reflectRay, depth + 1);
+			
+			outRadiance = outRadiance + trace(reflectRay, depth + 1) * Fresnel(ray.dir, hit.normal);
 		}
 		return outRadiance;
 	}
