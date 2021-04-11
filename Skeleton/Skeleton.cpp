@@ -59,6 +59,8 @@
 //	}
 //)";
 
+void vec3Print(std::string name, vec3 vector);
+
 // vertex shader in GLSL
 const char *vertexSource = R"(
 	#version 330
@@ -90,7 +92,7 @@ const char *fragmentSource = R"(
 
 GPUProgram gpuProgram; // vertex and fragment shaders
 unsigned int vao;	   // virtual world on the GPU
-const float EPSILON = 0.0001f;
+const float EPSILON = 0.01f;
 
 struct Material {
 	vec3 ka, kd, ks;
@@ -104,7 +106,6 @@ struct Hit {
 	vec3 position, normal;
 	Material *material;
 	Hit() { t = -1; }
-
 };
 
 struct Ray {
@@ -119,44 +120,6 @@ protected:
 	Material *material;
 public:
 	virtual Hit intersect(const Ray &ray, Hit hit) = 0;
-
-};
-
-struct Elipsoid : public Intersectable {
-	vec3 center;
-	vec3 radius;
-
-	Elipsoid() {}
-
-	Elipsoid(vec3 center, float xRad, float yRad, float zRad, Material* _material) : center(center), radius(xRad, yRad, zRad) {
-		material = _material;
-	}
-
-	Hit intersect(const Ray& ray, Hit uselessHit) {
-		Hit hit;
-		//Forras: https://en.wikipedia.org/wiki/Ellipsoid
-		float a = (ray.dir.x * ray.dir.x) / (radius.x * radius.x) +
-			(ray.dir.y * ray.dir.y) / (radius.y * radius.y) +
-			(ray.dir.z * ray.dir.z) / (radius.z * radius.z);
-		float b = ((ray.start.x - center.x) * ray.dir.x * 2.0) / (radius.x * radius.x) +
-			((ray.start.y - center.y) * ray.dir.y * 2.0) / (radius.y * radius.y) +
-			((ray.start.z - center.z) * ray.dir.z * 2.0) / (radius.z * radius.z);
-		float c = ((ray.start.x - center.x) * (ray.start.x - center.x)) / (radius.x * radius.x) +
-			((ray.start.y - center.y) * (ray.start.y - center.y)) / (radius.y * radius.y) +
-			((ray.start.z - center.z) * (ray.start.z - center.z)) / (radius.z * radius.z) - 1.0f;
-		float discr = b * b - 4.0 * a * c;
-		if (discr < 0) return hit;
-		float sqrt_discr = sqrtf(discr);
-		float t1 = (-b + sqrt_discr) / 2.0 / a;
-		float t2 = (-b - sqrt_discr) / 2.0 / a;
-		if (t1 <= 0) return hit;
-		hit.t = (t2 > 0) ? t2 : t1;
-		hit.position = ray.start + ray.dir * hit.t;
-		hit.normal = normalize(vec3(hit.position.x / (radius.x * radius.x), hit.position.y / (radius.y * radius.y), hit.position.z / (radius.z * radius.z)) * 2.0);
-		hit.material = material;
-		return hit;
-
-	}
 };
 
 class Dodecahedron : public Intersectable {
@@ -201,8 +164,8 @@ class Dodecahedron : public Intersectable {
 public:
 	Dodecahedron() {
 		//TODO: ha nagyon fucked a tükrözõdés akkor ezeket kell baszni
-		vec3 kd(1.5f, 1.5f, 1.5f), ks(50, 50, 50);
-		material = new Material(kd, ks, 50, false);
+		vec3 kd(3.5f, 0.5f, 0.5f), ks(500, 0, 0);
+		material = new Material(kd, ks, 5000, false);
 		material->isReflective = false;
 	}
 
@@ -212,10 +175,11 @@ public:
 		vec3 p3 = vertices[faces[faceIndex][2] - 1];
 
 		vec3 normal = cross(p2 - p1, p3 - p1);
+		//WARN: idk a p2-p1 jó-e, eredetileg p1 volt csak de az nem logikus ????
 		if (dot(p1, normal) < 0)	//ha kifelé mutat meginvertáljuk
 			normal = -normal;
 		//TODO: szkél??
-		return std::pair<vec3, vec3>(p1, normal);
+		return std::make_pair(p1, normal);
 	}
 
 	Hit intersect(const Ray &ray, Hit hit) {
@@ -227,13 +191,13 @@ public:
 			float ti;	//distance on ray from start 'till first intersection
 			if (abs(dot(normal, ray.dir)) > EPSILON) {
 				ti = dot(p1 - ray.start, normal) / dot(normal, ray.dir);
-			} else {
+			}
+			else {
 				ti = -1.0f;
 			}
 
 			if (ti <= EPSILON || (ti > hit.t && hit.t > 0)) continue;	//is current ti closer than hit.t?
 			vec3 pintersect = ray.start + ray.dir * ti;
-
 
 			//now we check if intersection is outside of the face or not
 			bool outside = false;
@@ -243,7 +207,7 @@ public:
 				vec3 otherPoint = otherPlanePair.first;
 				vec3 otherNormal = otherPlanePair.second;
 				//printf("normal: %3.5f, %3.5f, %3.5f\npintersect: %3.5f, %3.5f, 3.5f\nother point: %3.5f, %3.5f, %3.5f\n", normal.x, normal.y, normal.z, pintersect.x, pintersect.y, pintersect.z, otherPoint.x, otherPoint.y, otherPoint.z);
-				if (dot(normal, pintersect - otherPoint) > 0) {	//checks if normalvector is pointing inwards
+				if (dot(otherNormal, pintersect - otherPoint) > 0) {	//checks if normalvector is pointing inwards
 					//printf("entered if(dot(normal, pintersect - otherPoint > 0))\n");
 					outside = true;
 					break;
@@ -254,7 +218,7 @@ public:
 				hit.position = pintersect;
 				hit.normal = normalize(normal);
 				hit.material = material;
-				printf("intersect");
+				//printf("intersect");
 			}
 		}
 		return hit;
@@ -299,43 +263,30 @@ struct Light {
 };
 
 class Scene {
-	Elipsoid elipsoid;
 	Dodecahedron dodecahedron;
 	std::vector<Light *> lights;
-	Camera camera;
 	vec3 La = { 0.4f, 0.4f, 0.4f };
 	//TODO: ellipsoid
 
 public:
+	Camera camera;
 	void build() {
 		camera = Camera();
-		camera.set(vec3(5.0f, 5.0f, 1.0f), vec3(0.0f, 0.0f, 0.0f));
+		camera.set(vec3(0.5f, 0.5f, 0.5f), vec3(0.0f, 0.0f, 0.0f));
 		dodecahedron = Dodecahedron();
 		vec3 Le = { 2.0f, 2.0f, 2.0f };
 		vec3 lightDirection = { 5.0f, 5.0f, 1.0f };
 		lights.push_back(new Light(lightDirection, Le));
+		lights.push_back(new Light(lightDirection * (-1), Le));
 		//TODO: ellipsoid
-
-
-		//TODO: DELETE
-		vec3 kd1(0.3f, 0.2f, 0.1f), ks1(2, 2, 2);
-		Material * material1 = new Material(kd1, ks1, 50, false);
-		elipsoid = Elipsoid(vec3(0, 0, 0), 1.0f, 2.0f, 1.0f, material1);
 	}
 
 	Hit firstIntersect(Ray ray) {
 		Hit bestHit = Hit();
 		//TODO: Ellipsoid ray megvizsgálása
-		// bestHit = intersectEllipsoid valami;
-		/*bestHit = dodecahedron.intersect(ray, bestHit);
-		if (dot(ray.dir, bestHit.normal) > 0)
-			bestHit.normal = bestHit.normal * (-1);*/
 
-		Hit hit = elipsoid.intersect(ray, Hit());
-			if (hit.t > 0 && (bestHit.t < 0 || hit.t < bestHit.t)) {
-				bestHit = hit;
-			}
-		if (dot(ray.dir, bestHit.normal) > 0) bestHit.normal = bestHit.normal * (-1);
+		bestHit = dodecahedron.intersect(ray, bestHit);
+		if (dot(ray.dir, bestHit.normal) < 0) bestHit.normal = bestHit.normal * (-1);
 		return bestHit;
 	}
 
@@ -355,7 +306,6 @@ public:
 	bool shadowIntersect(Ray ray) {	// for directional lights
 		//TODO: ezt szépítsd meg úristen de ronda
 		Hit hit;
-		if (elipsoid.intersect(ray, hit).t > 0) return true;
 		if (dodecahedron.intersect(ray, hit).t > 0) return true;
 		return false;
 	}
@@ -391,7 +341,7 @@ public:
 		// maybe ray.weight???????????????????
 		return outRadiance;
 	}
-};
+} scene;
 
 class FullScreenTexturedQuad {
 	unsigned int vao;	// vertex array object id and texture id
@@ -423,14 +373,7 @@ public:
 
 FullScreenTexturedQuad *fullScreenTexturedQuad;
 
-// Initialization, create an OpenGL context
-void onInitialization() {
-	glViewport(0, 0, windowWidth, windowHeight);
-	Dodecahedron dodecahedron();
-	//TODO: create scene
-	Scene scene = Scene();
-	scene.build();
-
+void sceneRender() {
 	// this will contain the pixel data
 	std::vector<vec4> image(windowWidth * windowHeight);
 
@@ -438,7 +381,17 @@ void onInitialization() {
 
 	// copy image to GPU as a texture
 	fullScreenTexturedQuad = new FullScreenTexturedQuad(windowWidth, windowHeight, image);
+}
 
+// Initialization, create an OpenGL context
+void onInitialization() {
+	glViewport(0, 0, windowWidth, windowHeight);
+	Dodecahedron dodecahedron();
+	//TODO: create scene
+	scene = Scene();
+	scene.build();
+
+	sceneRender();
 
 	// create program for the GPU
 	gpuProgram.create(vertexSource, fragmentSource, "outColor");
@@ -488,5 +441,14 @@ void onMouse(int button, int state, int pX, int pY) { // pX, pY are the pixel co
 
 // Idle event indicating that some time elapsed: do animation here
 void onIdle() {
-	long time = glutGet(GLUT_ELAPSED_TIME); // elapsed time since the start of the program
+	float time = glutGet(GLUT_ELAPSED_TIME); // elapsed time since the start of the program
+	scene.camera.Animate(time / 5000);
+	
+	sceneRender();
+	glutPostRedisplay();
+}
+
+
+void vec3Print(std::string name, vec3 vector) {
+	printf("%s: X: %3.2f, Y: %3.2f, Z: %3.2f\n", name.c_str(), vector.x, vector.y, vector.z);
 }
