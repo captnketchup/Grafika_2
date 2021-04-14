@@ -335,9 +335,7 @@ public:
 		return hit;
 	}
 
-	bool hits(Hit hit) {
-		return
-	}
+
 };
 
 
