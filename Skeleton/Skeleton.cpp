@@ -145,7 +145,7 @@ class Intersectable {
 protected:
 	Material *material;
 public:
-	virtual Hit intersect(const Ray &ray, Hit hit) = 0;
+	virtual Hit intersect(const Ray &ray) = 0;
 };
 
 class Dodecahedron : public Intersectable {
@@ -188,10 +188,6 @@ class Dodecahedron : public Intersectable {
 	};
 
 public:
-	vec3 n = vec3(0.01, 0.01, 0.01);
-	//vec3 n = vec3(1,1,1);		//ezeket az egyik vidyaban láttam mint tökéletes tükrözõ anyag, de elég fuckedul néz ki mert tiszta köd
-	//vec3 kappa = vec3(5,4,3);
-	vec3 kappa = vec3(10.0, 10.0, 10.0);
 
 	Dodecahedron() {
 		//TODO: ha nagyon fucked a tükrözõdés akkor ezeket kell baszni
@@ -217,7 +213,8 @@ public:
 		return abs(dot(point - planePoint, planeNormal));
 	}
 
-	Hit intersect(const Ray &ray, Hit hit) {
+	Hit intersect(const Ray &ray) {
+		Hit hit = Hit();
 		for (int i = 0; i < faces.size(); i++) {
 			Pair<vec3, vec3> planePair = getObjectPlane(i);
 			vec3 planePoint = planePair.first;	//first point of face
@@ -231,7 +228,7 @@ public:
 				ti = -1.0f;
 			}
 
-			if (ti <= EPSILON || (ti > hit.t && hit.t > 0)) continue;	//is current ti closer than hit.t?
+			if (ti <= EPSILON) continue;	//is current ti closer than hit.t?
 			vec3 pintersect = ray.start + ray.dir * ti;
 
 			//now we check if intersection is outside of the face or not
@@ -280,7 +277,7 @@ public:
 
 		material = new Material(kd, ks, 50, true);
 	}
-	Hit intersect(const Ray &ray, Hit hit) {
+	Hit intersect(const Ray &ray) {
 		//checks if intersects paraboloid
 		float a = expA * ray.dir.x * ray.dir.x +
 			expB * ray.dir.y * ray.dir.y;
@@ -291,7 +288,7 @@ public:
 			expB * ray.start.y * ray.start.y -
 			expC * ray.start.z;
 
-		if (!hasRoot(a, b, c)) return hit;
+		if (!hasRoot(a, b, c)) return Hit();
 
 		Pair<float, float> tIntersect = quadraticEq(a, b, c);
 
@@ -301,10 +298,6 @@ public:
 		vec3 tempPosition1 = ray.start + ray.dir * t1;
 		vec3 tempPosition2 = ray.start + ray.dir * t2;
 
-		//if ((ray.dir.x + 0.57735) * (ray.dir.x + 0.57735) + (ray.dir.y + 0.57735) * (ray.dir.y + 0.57735) + (ray.dir.z + 0.57735) * (ray.dir.z + 0.57735) < 0.05) {
-		//	vec3Print("tempPosition", tempPosition);
-		//	ray.RayPrint();
-		//}
 		float tTest = -1.0;
 
 		if (dot(tempPosition1, tempPosition1) > (radius * radius))
@@ -320,8 +313,9 @@ public:
 			tTest = t2;
 		}
 
-		if (tTest <= 0) return hit;		//idk hogy kell-e egyenlo
-
+		if (tTest <= 0) return Hit();		//idk hogy kell-e egyenlo
+		
+		Hit hit = Hit();
 		hit.t = tTest;
 		hit.position = ray.start + ray.dir * hit.t;
 
@@ -392,11 +386,9 @@ class Scene {
 		vec3 F0 = vec3();
 		vec3 n = paraboloid.n;
 		vec3 kappa = paraboloid.kappa;
-		F0 = ((n - one) * (n - one) + (kappa * kappa)) / ((n + one) * (n + one) + (kappa * kappa));
-		/*F0.x = ((n.x - one.x) * (n.x - one.x) + kappa.x * kappa.x) / ((n.x + one.x) * (n.x + one.x) + kappa.x * kappa.x);
-		F0.y = ((n.y - one.y) * (n.y - one.y) + kappa.y * kappa.y) / ((n.y + one.y) * (n.y + one.y) + kappa.y * kappa.y);
-		F0.z = ((n.z - one.z) * (n.z - one.z) + kappa.z * kappa.z) / ((n.z + one.z) * (n.z + one.z) + kappa.z * kappa.z);*/
-		return F0 + (one - F0) * pow(1 - cosa, 5);
+		F0 = ((n - one) * (n - one) + (kappa * kappa)) / 
+			((n + one) * (n + one) + (kappa * kappa));
+		return F0 + (one - F0) * pow(cosa, 5);		//return F0 + (one - F0) * pow(1 - cosa, 5); volt de 1- nélkül jobban néz ki a pow
 	}
 
 public:
@@ -432,7 +424,7 @@ public:
 	bool shadowIntersect(Ray ray) {
 		//TODO: ezt szépítsd meg úristen de ronda
 		Hit hit;
-		if (dodecahedron.intersect(ray, hit).t > 0) return true;
+		if (dodecahedron.intersect(ray).t > 0) return true;
 		return false;
 	}
 
@@ -441,8 +433,8 @@ public:
 	vec3 trace(Ray ray, int depth = 0) {
 		if (depth > maxDepth) return La;
 
-		Hit paraboloidHit = paraboloid.intersect(ray, Hit());
-		Hit dodecaHit = dodecahedron.intersect(ray, Hit());
+		Hit paraboloidHit = paraboloid.intersect(ray);
+		Hit dodecaHit = dodecahedron.intersect(ray);
 		vec3 outRadiance(0, 0, 0);		// the radiancy(kinda color) of a given point where the ray intersects
 
 		if (dot(ray.dir, paraboloidHit.normal) < 0) paraboloidHit.normal = paraboloidHit.normal * (-1);
@@ -458,7 +450,6 @@ public:
 		//intersects dodeca
 		else if (dodecaHit.t >= 0) {
 			if (!dodecaHit.isReflective) { //if material is rough
-				//printf("Intersected dodeca edge\n");
 				outRadiance = dodecaHit.material->ka * La;
 				for (Light *light : lights) {
 					//TODO: epsilon
@@ -476,7 +467,7 @@ public:
 					}
 				}
 			}
-			else {
+			else {	//enter portal
 				vec3 reflectionDir = reflect(ray.dir, dodecaHit.normal);
 				Ray reflectRay(dodecaHit.position - dodecaHit.normal * EPSILON, reflectionDir);
 
