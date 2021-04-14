@@ -59,6 +59,11 @@
 //	}
 //)";
 
+
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+//TODO : std::pairt nem lehet használni !!!!!!  FONTOS
+//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 void vec3Print(std::string name, vec3 vector);
 std::pair<float, float> quadraticEq(float a, float b, float c);
 bool hasRoot(float a, float b, float c);
@@ -100,7 +105,8 @@ const float EPSILON = 0.01f;
 struct Material {
 	vec3 ka, kd, ks;
 	float shininess;
-	Material(vec3 _kd, vec3 _ks, float _shininess, bool _isReflective) : ka(_kd *M_PI), kd(_kd), ks(_ks), shininess(_shininess) {};
+	//Material(vec3 _kd, vec3 _ks, float _shininess, bool _isReflective) : ka(_kd *M_PI), kd(_kd), ks(_ks), shininess(_shininess) {};
+	Material(vec3 _kd, vec3 _ks, float _shininess, bool _isReflective) : ka(0.02f, 0.02f, 0.02f), kd(_kd), ks(_ks), shininess(_shininess) {};
 };
 
 struct Hit {
@@ -176,9 +182,9 @@ public:
 	Dodecahedron() {
 		//TODO: ha nagyon fucked a tükrözõdés akkor ezeket kell baszni
 		//vec3 kd(0.5f, 0.05f, 1.5f), ks(500.0f, 100.0f, 100.0f);
-		vec3 kd(0.592f, 0.0f, 0.639f), ks(1.0f, 1.0f, 1.0f);		//ks hogy melyik színt hogy csillantja meg
+		vec3 kd(0.592f, 0.0f, 0.639f), ks(0.8f, 0.2f, 0.4f);		//ks hogy melyik színt hogy csillantja meg
 		//material = new Material(kd, ks, 50, false);
-		material = new Material(kd, ks, 70, false);
+		material = new Material(kd, ks, 10, false);
 	}
 
 	std::pair<vec3, vec3> getObjectPlane(int faceIndex) {
@@ -262,16 +268,6 @@ public:
 	}
 	Hit intersect(const Ray &ray, Hit hit) {
 		//checks if intersects paraboloid
-		/*float a = expA * ray.dir.x * ray.dir.x +
-			expB * ray.dir.y * ray.dir.y -
-			expC * ray.dir.z * ray.dir.z;
-		float b = expA * 2 * ray.start.x * ray.dir.x +
-			expB * 2 * ray.start.y * ray.dir.y -
-			expC * 2 * ray.start.z * ray.dir.z;
-		float c = expA * ray.start.x * ray.start.x +
-			expB * ray.start.y * ray.start.y -
-			expC * ray.start.z * ray.start.z;*/
-
 		float a = expA * ray.dir.x * ray.dir.x +
 			expB * ray.dir.y * ray.dir.y;
 		float b = 2 * expA * ray.start.x * ray.dir.x +
@@ -281,35 +277,39 @@ public:
 			expB * ray.start.y * ray.start.y -
 			expC * ray.start.z;
 
-
-
-
-			if (!hasRoot(a, b, c)) return hit;
-
+		if (!hasRoot(a, b, c)) return hit;
 
 		std::pair<float, float> tIntersect = quadraticEq(a, b, c);
 
 		float t1 = tIntersect.first;
 		float t2 = tIntersect.second;
 
+		vec3 tempPosition1 = ray.start + ray.dir * t1;
+		vec3 tempPosition2 = ray.start + ray.dir * t2;
 
-		vec3 tempPosition = ray.start + ray.dir * hit.t;
 		//if ((ray.dir.x + 0.57735) * (ray.dir.x + 0.57735) + (ray.dir.y + 0.57735) * (ray.dir.y + 0.57735) + (ray.dir.z + 0.57735) * (ray.dir.z + 0.57735) < 0.05) {
 		//	vec3Print("tempPosition", tempPosition);
 		//	ray.RayPrint();
 		//}
+		float tTest = -1.0;
 
-		if (tempPosition.x * tempPosition.x + tempPosition.y * tempPosition.y + tempPosition.z * tempPosition.z > radius * radius)
-			return hit;
-		if (t1 <= 0) return hit;
+		if (dot(tempPosition1, tempPosition1) > (radius * radius))
+			t1 = -1.0f;		//t1 nem jo
 
-		if (t2 > 0) {
-			hit.t = t2;
+		if (dot(tempPosition2, tempPosition2) > (radius * radius))
+			t2 = -1.0f;		//t2 nem jo
+
+
+		if (t1 > 0) tTest = t1;		//t1 ervenyes
+
+		if (t2 > 0 && t2 < tTest) {
+			tTest = t2;
 		}
-		else {
-			hit.t = t1;
-		}
-		hit.position = tempPosition;
+
+		if (tTest <= 0) return hit;		//idk hogy kell-e egyenlo
+
+		hit.t = tTest;
+		hit.position = ray.start + ray.dir * hit.t;
 
 		//https://aggie.io/ysax3oxo0k
 		vec3 focusPoint = { 0.0f, hit.position.y / (4 * (hit.position.x * hit.position.x + hit.position.z * hit.position.z)), 0.0f };
@@ -356,6 +356,10 @@ struct Light {
 	Light(vec3 _position, vec3 _Le) : position(_position), Le(_Le) {};
 };
 
+vec3 operator/(vec3 lhs, vec3 rhs) {
+	return vec3(lhs.x / rhs.x, lhs.y / rhs.y, lhs.z / rhs.z);
+}
+
 class Scene {
 	Dodecahedron dodecahedron;
 	Paraboloid paraboloid;
@@ -374,9 +378,10 @@ class Scene {
 		vec3 F0 = vec3();
 		vec3 n = dodecahedron.n;
 		vec3 kappa = dodecahedron.kappa;
-		F0.x = ((n.x - one.x) * (n.x - one.x) + kappa.x * kappa.x) / ((n.x + one.x) * (n.x + one.x) + kappa.x * kappa.x);
+		F0 = ((n - one) * (n - one) + (kappa * kappa)) / ((n + one) * (n + one) + (kappa * kappa));
+		/*F0.x = ((n.x - one.x) * (n.x - one.x) + kappa.x * kappa.x) / ((n.x + one.x) * (n.x + one.x) + kappa.x * kappa.x);
 		F0.y = ((n.y - one.y) * (n.y - one.y) + kappa.y * kappa.y) / ((n.y + one.y) * (n.y + one.y) + kappa.y * kappa.y);
-		F0.z = ((n.z - one.z) * (n.z - one.z) + kappa.z * kappa.z) / ((n.z + one.z) * (n.z + one.z) + kappa.z * kappa.z);
+		F0.z = ((n.z - one.z) * (n.z - one.z) + kappa.z * kappa.z) / ((n.z + one.z) * (n.z + one.z) + kappa.z * kappa.z);*/
 		return F0 + (one - F0) * pow(1 - cosa, 5);
 	}
 
@@ -387,7 +392,8 @@ public:
 		camera.set(vec3(0.5f, 0.5f, 0.5f), vec3(0.0f, 0.0f, 0.0f));
 		dodecahedron = Dodecahedron();
 		paraboloid = Paraboloid();
-		vec3 Le = { 2.0f, 2.0f, 2.0f };
+		//vec3 Le = { 2.0f, 2.0f, 2.0f };
+		vec3 Le = { 1.0f, 1.0f, 1.0f };
 		vec3 lightPosition = { 0.0f, 0.0f, 0.0f };			// ez nem lesz jó mert itt lesz a cucc középen
 		//vec3 lightPosition = { 0.2f, 0.2f, 0.2f };
 		lights.push_back(new Light(lightPosition, Le));
@@ -434,7 +440,7 @@ public:
 		//return vec3(1.0f, 0.0f, 0.0f);
 		vec3 outRadiance(0, 0, 0);		// the radiancy(kinda color) of a given point where the ray intersects
 		//outRadiance = outRadiance + La; // we add the ambient light to it
-		//outRadiance = hit.material->ka * La;		// ezt találtam a rekurzív raytracelõs videóban 07:28, ekcsölli jól néz ki
+		outRadiance = hit.material->ka * La;		// ezt találtam a rekurzív raytracelõs videóban 07:28, ekcsölli jól néz ki
 		if (!hit.isReflective) { //if material is rough
 			for (Light *light : lights) {
 				//TODO: epsilon
