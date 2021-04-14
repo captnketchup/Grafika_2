@@ -61,12 +61,9 @@
 
 
 //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-//TODO : std::pairt nem lehet használni !!!!!!  FONTOS
+//TODO : Pairt nem lehet használni !!!!!!  FONTOS
 //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-void vec3Print(std::string name, vec3 vector);
-std::pair<float, float> quadraticEq(float a, float b, float c);
-bool hasRoot(float a, float b, float c);
 
 
 // vertex shader in GLSL
@@ -102,6 +99,22 @@ GPUProgram gpuProgram; // vertex and fragment shaders
 unsigned int vao;	   // virtual world on the GPU
 const float EPSILON = 0.01f;
 
+template<typename T1, typename T2>
+class Pair {
+public:
+	T1 first;
+	T2 second;
+	Pair() {}
+	Pair(T1 _first, T2 _second) {
+		first = _first;
+		second = _second;
+	}
+};
+
+void vec3Print(std::string name, vec3 vector);
+Pair<float, float> quadraticEq(float a, float b, float c);
+bool hasRoot(float a, float b, float c);
+
 struct Material {
 	vec3 ka, kd, ks;
 	float shininess;
@@ -114,6 +127,7 @@ struct Hit {
 	vec3 position, normal;
 	Material *material;
 	bool isReflective;
+	bool isPortal;
 	Hit() { t = -1; }
 };
 
@@ -187,7 +201,7 @@ public:
 		material = new Material(kd, ks, 10, false);
 	}
 
-	std::pair<vec3, vec3> getObjectPlane(int faceIndex) {
+	Pair<vec3, vec3> getObjectPlane(int faceIndex) {
 		vec3 p1 = vertices[faces[faceIndex][0] - 1];
 		vec3 p2 = vertices[faces[faceIndex][1] - 1];
 		vec3 p3 = vertices[faces[faceIndex][2] - 1];
@@ -196,7 +210,7 @@ public:
 		if (dot(p1, normal) < 0)	//ha kifelé mutat meginvertáljuk
 			normal = -normal;
 		//TODO: szkél??
-		return std::make_pair(p1, normal);
+		return Pair<vec3, vec3>(p1, normal);
 	}
 
 	float distanceFromPlane(vec3 point, vec3 planePoint, vec3 planeNormal) {
@@ -205,7 +219,7 @@ public:
 
 	Hit intersect(const Ray &ray, Hit hit) {
 		for (int i = 0; i < faces.size(); i++) {
-			std::pair<vec3, vec3> planePair = getObjectPlane(i);
+			Pair<vec3, vec3> planePair = getObjectPlane(i);
 			vec3 planePoint = planePair.first;	//first point of face
 			vec3 planeNormal = planePair.second;	//the normal of the plane
 
@@ -225,7 +239,7 @@ public:
 			bool reflective = true;
 			for (int j = 0; j < faces.size(); j++) {
 				if (i == j) continue;
-				std::pair<vec3, vec3> otherPlanePair = getObjectPlane(j);
+				Pair<vec3, vec3> otherPlanePair = getObjectPlane(j);
 				vec3 otherPlanePoint = otherPlanePair.first;
 				vec3 otherPlaneNormal = otherPlanePair.second;
 				//printf("normal: %3.5f, %3.5f, %3.5f\npintersect: %3.5f, %3.5f, 3.5f\nother point: %3.5f, %3.5f, %3.5f\n", normal.x, normal.y, normal.z, pintersect.x, pintersect.y, pintersect.z, otherPoint.x, otherPoint.y, otherPoint.z);
@@ -279,7 +293,7 @@ public:
 
 		if (!hasRoot(a, b, c)) return hit;
 
-		std::pair<float, float> tIntersect = quadraticEq(a, b, c);
+		Pair<float, float> tIntersect = quadraticEq(a, b, c);
 
 		float t1 = tIntersect.first;
 		float t2 = tIntersect.second;
@@ -319,6 +333,10 @@ public:
 		hit.normal = normal;
 		hit.material = material;
 		return hit;
+	}
+
+	bool hits(Hit hit) {
+		return
 	}
 };
 
@@ -376,8 +394,8 @@ class Scene {
 		float cosa = -dot(inDirectionVec, normal);
 		vec3 one(1, 1, 1);
 		vec3 F0 = vec3();
-		vec3 n = dodecahedron.n;
-		vec3 kappa = dodecahedron.kappa;
+		vec3 n = paraboloid.n;
+		vec3 kappa = paraboloid.kappa;
 		F0 = ((n - one) * (n - one) + (kappa * kappa)) / ((n + one) * (n + one) + (kappa * kappa));
 		/*F0.x = ((n.x - one.x) * (n.x - one.x) + kappa.x * kappa.x) / ((n.x + one.x) * (n.x + one.x) + kappa.x * kappa.x);
 		F0.y = ((n.y - one.y) * (n.y - one.y) + kappa.y * kappa.y) / ((n.y + one.y) * (n.y + one.y) + kappa.y * kappa.y);
@@ -464,6 +482,8 @@ public:
 			Ray reflectRay(hit.position - hit.normal * EPSILON, reflectionDir);
 
 			outRadiance = outRadiance + trace(reflectRay, depth + 1) * Fresnel(ray.dir, hit.normal);
+
+
 		}
 		return outRadiance;
 	}
@@ -584,15 +604,12 @@ bool hasRoot(float a, float b, float c) {
 	return b * b - 4.0 * a * c > 0;
 }
 
-std::pair<float, float> quadraticEq(float a, float b, float c) {
+Pair<float, float> quadraticEq(float a, float b, float c) {
 	float t1, t2 = 0.0f;
 
 	t1 = ((-1) * b + sqrtf(b * b - 4 * a * c)) / (2 * a);
 	t2 = ((-1) * b - sqrtf(b * b - 4 * a * c)) / (2 * a);
 
-	std::pair<float, float> tPair;
-	tPair.first = t1;
-	tPair.second = t2;
+	Pair<float, float> tPair(t1, t2);
 	return tPair;
 }
-
