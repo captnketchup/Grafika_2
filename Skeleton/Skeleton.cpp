@@ -1,5 +1,5 @@
 //=============================================================================================
-// Mintaprogram: Zöld háromszög. Ervenyes 2019. osztol.
+// Mintaprogram: Zold haromszog. Ervenyes 2019. osztol.
 //
 // A beadott program csak ebben a fajlban lehet, a fajl 1 byte-os ASCII karaktereket tartalmazhat, BOM kihuzando.
 // Tilos:
@@ -18,8 +18,8 @@
 //
 // NYILATKOZAT
 // ---------------------------------------------------------------------------------------------
-// Nev    : 
-// Neptun : 
+// Nev    : Kovari Daniel Mate
+// Neptun : JDP18V
 // ---------------------------------------------------------------------------------------------
 // ezennel kijelentem, hogy a feladatot magam keszitettem, es ha barmilyen segitseget igenybe vettem vagy
 // mas szellemi termeket felhasznaltam, akkor a forrast es az atvett reszt kommentekben egyertelmuen jeloltem.
@@ -60,6 +60,9 @@
 //)";
 
 void vec3Print(std::string name, vec3 vector);
+std::pair<float, float> quadraticEq(float a, float b, float c);
+bool hasRoot(float a, float b, float c);
+
 
 // vertex shader in GLSL
 const char *vertexSource = R"(
@@ -113,6 +116,9 @@ struct Ray {
 	Ray(vec3 _start, vec3 _dir) {
 		start = _start; dir = normalize(_dir);
 	}
+	void RayPrint() const {
+		printf("Start: x: %3.5f\ty: %3.5f\tz: %3.5f\nDir: x: %3.5f\ty: %3.5f\tz: %3.5f\n", start.x, start.y, start.z, dir.x, dir.y, dir.z);
+	}
 };
 
 class Intersectable {
@@ -163,12 +169,16 @@ class Dodecahedron : public Intersectable {
 
 public:
 	vec3 n = vec3(0.01, 0.01, 0.01);
+	//vec3 n = vec3(1,1,1);		//ezeket az egyik vidyaban láttam mint tökéletes tükrözõ anyag, de elég fuckedul néz ki mert tiszta köd
+	//vec3 kappa = vec3(5,4,3);
 	vec3 kappa = vec3(10.0, 10.0, 10.0);
 
 	Dodecahedron() {
 		//TODO: ha nagyon fucked a tükrözõdés akkor ezeket kell baszni
-		vec3 kd(0.5f, 0.05f, 1.5f), ks(500, 100, 100);
-		material = new Material(kd, ks, 50, false);
+		//vec3 kd(0.5f, 0.05f, 1.5f), ks(500.0f, 100.0f, 100.0f);
+		vec3 kd(0.592f, 0.0f, 0.639f), ks(1.0f, 1.0f, 1.0f);		//ks hogy melyik színt hogy csillantja meg
+		//material = new Material(kd, ks, 50, false);
+		material = new Material(kd, ks, 70, false);
 	}
 
 	std::pair<vec3, vec3> getObjectPlane(int faceIndex) {
@@ -237,8 +247,79 @@ public:
 };
 
 class Paraboloid : public Intersectable {
-	vec3 center;
+	float expA = 0.8f, expB = 0.8f, expC = 0.1f;
+	float radius = 0.3f;
 
+public:
+	// meg voltak adva ezek
+	vec3 n = { 0.17f, 0.35f, 1.5f };
+	vec3 kappa = { 3.1f, 2.7f, 1.9f };
+
+	Paraboloid() {
+		vec3 kd(1.0f, 0.945f, 0.360f), ks(1.0f, 1.0f, 1.0f);		//idk aranyszínû szerû
+
+		material = new Material(kd, ks, 50, true);
+	}
+	Hit intersect(const Ray &ray, Hit hit) {
+		//checks if intersects paraboloid
+		/*float a = expA * ray.dir.x * ray.dir.x +
+			expB * ray.dir.y * ray.dir.y -
+			expC * ray.dir.z * ray.dir.z;
+		float b = expA * 2 * ray.start.x * ray.dir.x +
+			expB * 2 * ray.start.y * ray.dir.y -
+			expC * 2 * ray.start.z * ray.dir.z;
+		float c = expA * ray.start.x * ray.start.x +
+			expB * ray.start.y * ray.start.y -
+			expC * ray.start.z * ray.start.z;*/
+
+		float a = expA * ray.dir.x * ray.dir.x +
+			expB * ray.dir.y * ray.dir.y;
+		float b = 2 * expA * ray.start.x * ray.dir.x +
+			expB * 2 * ray.start.y * ray.dir.y -
+			expC * ray.dir.z;
+		float c = expA * ray.start.x * ray.start.x +
+			expB * ray.start.y * ray.start.y -
+			expC * ray.start.z;
+
+
+
+
+			if (!hasRoot(a, b, c)) return hit;
+
+
+		std::pair<float, float> tIntersect = quadraticEq(a, b, c);
+
+		float t1 = tIntersect.first;
+		float t2 = tIntersect.second;
+
+
+		vec3 tempPosition = ray.start + ray.dir * hit.t;
+		//if ((ray.dir.x + 0.57735) * (ray.dir.x + 0.57735) + (ray.dir.y + 0.57735) * (ray.dir.y + 0.57735) + (ray.dir.z + 0.57735) * (ray.dir.z + 0.57735) < 0.05) {
+		//	vec3Print("tempPosition", tempPosition);
+		//	ray.RayPrint();
+		//}
+
+		if (tempPosition.x * tempPosition.x + tempPosition.y * tempPosition.y + tempPosition.z * tempPosition.z > radius * radius)
+			return hit;
+		if (t1 <= 0) return hit;
+
+		if (t2 > 0) {
+			hit.t = t2;
+		}
+		else {
+			hit.t = t1;
+		}
+		hit.position = tempPosition;
+
+		//https://aggie.io/ysax3oxo0k
+		vec3 focusPoint = { 0.0f, hit.position.y / (4 * (hit.position.x * hit.position.x + hit.position.z * hit.position.z)), 0.0f };
+		vec3 paraboloidA = hit.position - focusPoint;
+		vec3 paraboloidB = length(paraboloidA) * vec3(0.0f, 1.0f, 0.0f);
+		vec3 normal = (-1) * normalize(paraboloidA + paraboloidB);
+		hit.normal = normal;
+		hit.material = material;
+		return hit;
+	}
 };
 
 
@@ -277,9 +358,10 @@ struct Light {
 
 class Scene {
 	Dodecahedron dodecahedron;
+	Paraboloid paraboloid;
 	std::vector<Light *> lights;
-	vec3 La = { 0.4f, 0.4f, 0.4f };
-	//TODO: ellipsoid
+	//vec3 La = { 0.4f, 0.4f, 0.4f };
+	vec3 La = { 0.584f, 0.827f, 0.933f };
 
 	// returns the reflected ray's direction vector
 	vec3 reflect(vec3 inDirectionVec, vec3 normal) {
@@ -292,9 +374,9 @@ class Scene {
 		vec3 F0 = vec3();
 		vec3 n = dodecahedron.n;
 		vec3 kappa = dodecahedron.kappa;
-		F0.x = ((n.x - one.x)*(n.x - one.x) + kappa.x * kappa.x) / ((n.x + one.x)*(n.x + one.x) + kappa.x * kappa.x);
-		F0.y = ((n.y - one.y)*(n.y - one.y) + kappa.y * kappa.y) / ((n.y + one.y)*(n.y + one.y) + kappa.y * kappa.y);
-		F0.z = ((n.z - one.z)*(n.z - one.z) + kappa.z * kappa.z) / ((n.z + one.z)*(n.z + one.z) + kappa.z * kappa.z);
+		F0.x = ((n.x - one.x) * (n.x - one.x) + kappa.x * kappa.x) / ((n.x + one.x) * (n.x + one.x) + kappa.x * kappa.x);
+		F0.y = ((n.y - one.y) * (n.y - one.y) + kappa.y * kappa.y) / ((n.y + one.y) * (n.y + one.y) + kappa.y * kappa.y);
+		F0.z = ((n.z - one.z) * (n.z - one.z) + kappa.z * kappa.z) / ((n.z + one.z) * (n.z + one.z) + kappa.z * kappa.z);
 		return F0 + (one - F0) * pow(1 - cosa, 5);
 	}
 
@@ -304,8 +386,10 @@ public:
 		camera = Camera();
 		camera.set(vec3(0.5f, 0.5f, 0.5f), vec3(0.0f, 0.0f, 0.0f));
 		dodecahedron = Dodecahedron();
+		paraboloid = Paraboloid();
 		vec3 Le = { 2.0f, 2.0f, 2.0f };
-		vec3 lightPosition = { 0, 0, 0 };
+		vec3 lightPosition = { 0.0f, 0.0f, 0.0f };			// ez nem lesz jó mert itt lesz a cucc középen
+		//vec3 lightPosition = { 0.2f, 0.2f, 0.2f };
 		lights.push_back(new Light(lightPosition, Le));
 		//lights.push_back(new Light(lightDirection * (-1), Le));
 		//TODO: ellipsoid haha nem is az xDDDD
@@ -314,8 +398,8 @@ public:
 	Hit firstIntersect(Ray ray) {
 		Hit bestHit = Hit();
 		//TODO: Ellipsoid ray megvizsgálása
-
 		bestHit = dodecahedron.intersect(ray, bestHit);
+		bestHit = paraboloid.intersect(ray, bestHit);
 		if (dot(ray.dir, bestHit.normal) < 0) bestHit.normal = bestHit.normal * (-1);
 		return bestHit;
 	}
@@ -333,7 +417,8 @@ public:
 		}
 	}
 
-	bool shadowIntersect(Ray ray) {	// for directional lights
+	// checks if shot out light intersects with something
+	bool shadowIntersect(Ray ray) {
 		//TODO: ezt szépítsd meg úristen de ronda
 		Hit hit;
 		if (dodecahedron.intersect(ray, hit).t > 0) return true;
@@ -349,6 +434,7 @@ public:
 		//return vec3(1.0f, 0.0f, 0.0f);
 		vec3 outRadiance(0, 0, 0);		// the radiancy(kinda color) of a given point where the ray intersects
 		//outRadiance = outRadiance + La; // we add the ambient light to it
+		//outRadiance = hit.material->ka * La;		// ezt találtam a rekurzív raytracelõs videóban 07:28, ekcsölli jól néz ki
 		if (!hit.isReflective) { //if material is rough
 			for (Light *light : lights) {
 				//TODO: epsilon
@@ -370,7 +456,7 @@ public:
 		else {
 			vec3 reflectionDir = reflect(ray.dir, hit.normal);
 			Ray reflectRay(hit.position - hit.normal * EPSILON, reflectionDir);
-			
+
 			outRadiance = outRadiance + trace(reflectRay, depth + 1) * Fresnel(ray.dir, hit.normal);
 		}
 		return outRadiance;
@@ -378,6 +464,7 @@ public:
 } scene;
 
 class FullScreenTexturedQuad {
+	//destruktor????
 	unsigned int vao;	// vertex array object id and texture id
 	Texture texture;
 public:
@@ -477,7 +564,7 @@ void onMouse(int button, int state, int pX, int pY) { // pX, pY are the pixel co
 void onIdle() {
 	float time = glutGet(GLUT_ELAPSED_TIME); // elapsed time since the start of the program
 	scene.camera.Animate(time / 5000);
-	
+
 	sceneRender();
 	glutPostRedisplay();
 }
@@ -486,3 +573,20 @@ void onIdle() {
 void vec3Print(std::string name, vec3 vector) {
 	printf("%s: X: %3.2f, Y: %3.2f, Z: %3.2f\n", name.c_str(), vector.x, vector.y, vector.z);
 }
+
+bool hasRoot(float a, float b, float c) {
+	return b * b - 4.0 * a * c > 0;
+}
+
+std::pair<float, float> quadraticEq(float a, float b, float c) {
+	float t1, t2 = 0.0f;
+
+	t1 = ((-1) * b + sqrtf(b * b - 4 * a * c)) / (2 * a);
+	t2 = ((-1) * b - sqrtf(b * b - 4 * a * c)) / (2 * a);
+
+	std::pair<float, float> tPair;
+	tPair.first = t1;
+	tPair.second = t2;
+	return tPair;
+}
+
