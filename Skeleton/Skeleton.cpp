@@ -98,6 +98,10 @@ const char *fragmentSource = R"(
 GPUProgram gpuProgram; // vertex and fragment shaders
 unsigned int vao;	   // virtual world on the GPU
 const float EPSILON = 0.01f;
+bool isMouseDown = false;
+int mouseX;
+int mouseY;
+bool printDebug = false;
 
 template<typename T1, typename T2>
 class Pair {
@@ -314,7 +318,7 @@ public:
 		}
 
 		if (tTest <= 0) return Hit();		//idk hogy kell-e egyenlo
-		
+
 		Hit hit = Hit();
 		hit.t = tTest;
 		hit.position = ray.start + ray.dir * hit.t;
@@ -386,9 +390,12 @@ class Scene {
 		vec3 F0 = vec3();
 		vec3 n = paraboloid.n;
 		vec3 kappa = paraboloid.kappa;
-		F0 = ((n - one) * (n - one) + (kappa * kappa)) / 
+		F0 = ((n - one) * (n - one) + (kappa * kappa)) /
 			((n + one) * (n + one) + (kappa * kappa));
-		return F0 + (one - F0) * pow(cosa, 5);		//return F0 + (one - F0) * pow(1 - cosa, 5); volt de 1- nélkül jobban néz ki a pow
+		if (printDebug) {
+			printf("cosa: %3.5f\n", cosa);
+		}
+		return F0 + (one - F0) * powf(1 - cosa, 5);		//return F0 + (one - F0) * pow(1 - cosa, 5); volt de 1- nélkül jobban néz ki a pow
 	}
 
 public:
@@ -413,6 +420,8 @@ public:
 		for (int Y = 0; Y < windowHeight; Y++) {
 #pragma omp parallel for
 			for (int X = 0; X < windowWidth; X++) {
+				if (isMouseDown && X == mouseX && Y == mouseY) printDebug = true;
+				else printDebug = false;
 				vec3 color = trace(camera.getRay(X, Y));
 				image[Y * windowWidth + X] = vec4(color.x, color.y, color.z, 1);
 				//image[Y * windowWidth + X] = ((X + Y) % 2) ? black : white;
@@ -469,14 +478,28 @@ public:
 			}
 			else {	//enter portal
 				vec3 reflectionDir = reflect(ray.dir, dodecaHit.normal);
+				vec4 tempReflDir = { reflectionDir.x, reflectionDir.y, reflectionDir.z, 0.0f };
+				mat4 rotationMat = RotationMatrix(72.0f * M_PI/180.0f, dodecaHit.normal);
+				tempReflDir = tempReflDir * rotationMat;
+				//vec3 rotatedDir = RotationMatrix(72.0f, reflectionDir);
+				reflectionDir.x = tempReflDir.x;
+				reflectionDir.y = tempReflDir.y;
+				reflectionDir.z = tempReflDir.z;
+				vec4 tempPosition = { dodecaHit.position.x, dodecaHit.position.y, dodecaHit.position.z, 0.0f };
+				tempPosition = tempPosition * rotationMat;
+				dodecaHit.position.x = tempPosition.x;
+				dodecaHit.position.y = tempPosition.y;
+				dodecaHit.position.z = tempPosition.z;
+
 				Ray reflectRay(dodecaHit.position - dodecaHit.normal * EPSILON, reflectionDir);
 
 				outRadiance = outRadiance + trace(reflectRay, depth + 1);
 			}
-		} else {
+		}
+		else {
 			return La;
 		}
-		
+
 		//return vec3(1.0f, 0.0f, 0.0f);
 		//outRadiance = outRadiance + La; // we add the ambient light to it
 				// ezt találtam a rekurzív raytracelõs videóban 07:28, ekcsölli jól néz ki
@@ -567,6 +590,13 @@ void onMouse(int button, int state, int pX, int pY) { // pX, pY are the pixel co
 	// Convert to normalized device space
 	float cX = 2.0f * pX / windowWidth - 1;	// flip y axis
 	float cY = 1.0f - 2.0f * pY / windowHeight;
+
+	mouseX = pX;
+	mouseY = pY;
+	if (state == GLUT_DOWN && button == GLUT_LEFT_BUTTON) {
+		isMouseDown = true;
+	}
+	else isMouseDown = false;
 
 	char *buttonStat;
 	switch (state) {
