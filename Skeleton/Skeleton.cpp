@@ -334,8 +334,6 @@ public:
 		hit.material = material;
 		return hit;
 	}
-
-
 };
 
 
@@ -417,15 +415,6 @@ public:
 		//TODO: ellipsoid haha nem is az xDDDD
 	}
 
-	Hit firstIntersect(Ray ray) {
-		Hit bestHit = Hit();
-		//TODO: Ellipsoid ray megvizsgálása
-		bestHit = dodecahedron.intersect(ray, bestHit);
-		bestHit = paraboloid.intersect(ray, bestHit);
-		if (dot(ray.dir, bestHit.normal) < 0) bestHit.normal = bestHit.normal * (-1);
-		return bestHit;
-	}
-
 	void render(std::vector<vec4> &image) {
 		vec4 black = vec4(1.0f, 1.0f, 1.0f, 1.0f);
 		vec4 white = vec4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -451,38 +440,55 @@ public:
 
 	vec3 trace(Ray ray, int depth = 0) {
 		if (depth > maxDepth) return La;
-		Hit hit = firstIntersect(ray);
-		if (hit.t < 0) return La;
-		//return vec3(1.0f, 0.0f, 0.0f);
+
+		Hit paraboloidHit = paraboloid.intersect(ray, Hit());
+		Hit dodecaHit = dodecahedron.intersect(ray, Hit());
 		vec3 outRadiance(0, 0, 0);		// the radiancy(kinda color) of a given point where the ray intersects
-		//outRadiance = outRadiance + La; // we add the ambient light to it
-		outRadiance = hit.material->ka * La;		// ezt találtam a rekurzív raytracelõs videóban 07:28, ekcsölli jól néz ki
-		if (!hit.isReflective) { //if material is rough
-			for (Light *light : lights) {
-				//TODO: epsilon
-				vec3 lightDirection = hit.position - light->position;
-				Ray shadowRay(hit.position + hit.normal * EPSILON, lightDirection);
-				//Ray shadowRay(hit.position + hit.normal * EPSILON, light->direction);
-				float cosTheta = dot(hit.normal, lightDirection);		// is used to determine whether light is coming behind from the object
-				//Hit shadowHit = firstIntersect(shadowRay);
-				// if there's no object between the light source and the given point
-				//if (cosTheta > 0 && (hit.t < 0 || shadowHit.t > length(light->position - hit.position))) {
-				if (cosTheta > 0 && !shadowIntersect(shadowRay)) {
-					outRadiance = outRadiance + light->Le * hit.material->kd * cosTheta;
-					vec3 halfway = normalize(-ray.dir + lightDirection);
-					float cosDelta = dot(hit.normal, halfway);
-					if (cosDelta > 0) outRadiance = outRadiance + light->Le * hit.material->ks * powf(cosDelta, hit.material->shininess);
+
+		if (dot(ray.dir, paraboloidHit.normal) < 0) paraboloidHit.normal = paraboloidHit.normal * (-1);
+		if (dot(ray.dir, dodecaHit.normal) < 0) dodecaHit.normal = dodecaHit.normal * (-1);
+
+		//intersects paraboloid
+		if (paraboloidHit.t >= 0 && paraboloidHit.t < dodecaHit.t) {
+			//printf("Intersected paraboloid\n");
+			vec3 reflectionDir = reflect(ray.dir, paraboloidHit.normal);
+			Ray reflectRay(paraboloidHit.position - paraboloidHit.normal * EPSILON, reflectionDir);
+			outRadiance = outRadiance + trace(reflectRay, depth + 1) * Fresnel(ray.dir, paraboloidHit.normal);
+		}
+		//intersects dodeca
+		else if (dodecaHit.t >= 0) {
+			if (!dodecaHit.isReflective) { //if material is rough
+				//printf("Intersected dodeca edge\n");
+				outRadiance = dodecaHit.material->ka * La;
+				for (Light *light : lights) {
+					//TODO: epsilon
+					vec3 lightDirection = dodecaHit.position - light->position;
+					Ray shadowRay(dodecaHit.position + dodecaHit.normal * EPSILON, lightDirection);
+					//Ray shadowRay(hit.position + hit.normal * EPSILON, light->direction);
+					float cosTheta = dot(dodecaHit.normal, lightDirection);		// is used to determine whether light is coming behind from the object
+					//Hit shadowHit = firstIntersect(shadowRay);
+					// if there's no object between the light source and the given point
+					if (cosTheta > 0 && !shadowIntersect(shadowRay)) {
+						outRadiance = outRadiance + light->Le * dodecaHit.material->kd * cosTheta;
+						vec3 halfway = normalize(-ray.dir + lightDirection);
+						float cosDelta = dot(dodecaHit.normal, halfway);
+						if (cosDelta > 0) outRadiance = outRadiance + light->Le * dodecaHit.material->ks * powf(cosDelta, dodecaHit.material->shininess);
+					}
 				}
 			}
+			else {
+				vec3 reflectionDir = reflect(ray.dir, dodecaHit.normal);
+				Ray reflectRay(dodecaHit.position - dodecaHit.normal * EPSILON, reflectionDir);
+
+				outRadiance = outRadiance + trace(reflectRay, depth + 1);
+			}
+		} else {
+			return La;
 		}
-		else {
-			vec3 reflectionDir = reflect(ray.dir, hit.normal);
-			Ray reflectRay(hit.position - hit.normal * EPSILON, reflectionDir);
-
-			outRadiance = outRadiance + trace(reflectRay, depth + 1) * Fresnel(ray.dir, hit.normal);
-
-
-		}
+		
+		//return vec3(1.0f, 0.0f, 0.0f);
+		//outRadiance = outRadiance + La; // we add the ambient light to it
+				// ezt találtam a rekurzív raytracelõs videóban 07:28, ekcsölli jól néz ki
 		return outRadiance;
 	}
 } scene;
